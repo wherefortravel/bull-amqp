@@ -30,10 +30,14 @@ class Queue {
       options = {
         connectionString: options,
       }
-
-      this._options = options
-      this._name = name
     }
+
+    if (!options) {
+      throw new Error(`options are required`)
+    }
+
+    this._options = options
+    this._name = name
   }
 
   async _ensureConnection() {
@@ -62,9 +66,9 @@ class Queue {
     return this._consumeChans[queue]
   }
 
-  async _ensurePublishQueueName(queue: string) {
+  async _ensureQueueExists(queue: string, channel: any) {
     if (!this._queuesExist[queue]) {
-      await (await this._ensurePublishChannelOpen()).assertQueue(queue)
+      await channel.assertQueue(queue)
       this._queuesExist[queue] = true
     }
   }
@@ -120,6 +124,8 @@ class Queue {
             })
           }
 
+    await this._ensureQueueExists(queue, chan)
+
     chan.consume(queue, async (msg) => {
       try {
         const data = JSON.parse(msg.content.toString())
@@ -154,9 +160,10 @@ class Queue {
       name = undefined
     }
 
+    const chan = await this._ensurePublishChannelOpen()
     const queue = this._getQueueName(name || this._name)
-    await this._ensurePublishQueueName(queue)
-    ;(await this._ensurePublishChannelOpen()).sendToQueue(
+    await this._ensureQueueExists(queue, chan)
+    chan.sendToQueue(
       queue,
       new Buffer(JSON.stringify(data)),
       this._getPublishOptions(),
