@@ -149,7 +149,11 @@ class Queue {
             },
           )
         }
-      } catch (err) {}
+
+        chan.ack(msg)
+      } catch (err) {
+        chan.nack(msg, false, false)
+      }
     })
   }
 
