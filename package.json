@@ -1,0 +1,25 @@
+{
+  "name": "bull-amqp",
+  "version": "1.0.0",
+  "description":
+    "A (almost) drop-in replacement for the Bull queue, backed by the AMQP protocol",
+  "main": "lib/index.js",
+  "repository": "https://github.com/wherefortravel/bull-amqp",
+  "author": "David Xu",
+  "license": "MIT",
+  "dependencies": {
+    "amqplib": "^0.5.2",
+    "bluebird": "^3.5.1"
+  },
+  "scripts": {
+    "build": "rm -rf ./lib && babel src --out-dir lib --copy-files"
+  },
+  "devDependencies": {
+    "babel-cli": "^6.26.0",
+    "babel-plugin-module-resolver": "^3.1.1",
+    "babel-plugin-transform-class-properties": "^6.24.1",
+    "babel-plugin-transform-flow-strip-types": "^6.22.0",
+    "babel-plugin-transform-object-rest-spread": "^6.26.0",
+    "babel-preset-env": "^1.7.0"
+  }
+}
