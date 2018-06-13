@@ -25,10 +25,18 @@ class Queue {
   _consumeChans: { [key: string]: any } = {} // TODO types
   _queuesExist: { [key: string]: boolean } = {}
 
-  constructor(name: string, options?: Options | string) {
-    if (typeof options === 'string') {
+  constructor(
+    name: string,
+    connectionString: string,
+    options?: Options | string,
+  ) {
+    if (typeof connectionString === 'object') {
+      options = connectionString
+    } else {
+      // $FlowFixMe
       options = {
-        connectionString: options,
+        ...(options || {}),
+        connectionString,
       }
     }
 
@@ -190,3 +198,5 @@ class Queue {
     throw new Error(`Not implemented yet`)
   }
 }
+
+export default Queue
