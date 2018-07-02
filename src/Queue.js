@@ -160,7 +160,7 @@ class Queue {
 
         chan.ack(msg)
       } catch (err) {
-        chan.nack(msg, false, false)
+        chan.nack(msg, false, true)
       }
     })
   }
