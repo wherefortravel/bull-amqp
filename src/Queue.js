@@ -187,14 +187,14 @@ class Queue extends EventEmitter {
         }
 
         if (newErrors.length < 3) {
-          this.emit('error', err)
+          this.emit('failure', err)
           pubChan.sendToQueue(
             queue,
             new Buffer(JSON.stringify(newData)),
             this._getPublishOptions(),
           )
         } else {
-          this.emit('failure', err)
+          this.emit('dropped', err)
           const queue = this._getQueueName('dead-letter-queue')
           await this._ensureQueueExists(queue, pubChan)
 
