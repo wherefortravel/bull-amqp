@@ -2,6 +2,7 @@
 
 import amqplib from 'amqplib'
 import Bluebird from 'bluebird'
+import { EventEmitter } from 'events'
 
 import { connect } from './connections'
 
@@ -17,7 +18,19 @@ type ProcessFnPromise = (job: Job) => Promise<any>
 type ProcessFnCallback = (job: Job, done: Function) => any
 type ProcessFn = ProcessFnPromise | ProcessFnCallback
 
-class Queue {
+function formatError(err: any) {
+  if (typeof err === 'string') {
+    return { message: err }
+  }
+
+  if (err instanceof Error) {
+    return { message: err.error, stack: err.stack }
+  }
+
+  return { message: String(err) }
+}
+
+class Queue extends EventEmitter {
   _options: Options
   _name: string
   _conn: any // TODO types
@@ -30,6 +43,8 @@ class Queue {
     connectionString: string,
     options?: Options | string,
   ) {
+    super()
+
     if (typeof connectionString === 'object') {
       options = connectionString
     } else {
@@ -135,8 +150,10 @@ class Queue {
     await this._ensureQueueExists(queue, chan)
 
     chan.consume(queue, async (msg) => {
+      let data = {}
       try {
-        const data = JSON.parse(msg.content.toString())
+        data = JSON.parse(msg.content.toString())
+
         const job = {
           data,
         }
@@ -160,7 +177,33 @@ class Queue {
 
         chan.ack(msg)
       } catch (err) {
-        chan.nack(msg, false, true)
+        chan.nack(msg, false, false)
+        const pubChan = await this._ensurePublishChannelOpen()
+        const errors = data['$$errors'] || []
+        const newErrors = [...errors, formatError(err)]
+        const newData = {
+          ...data,
+          ['$$errors']: newErrors,
+        }
+
+        if (newErrors.length < 3) {
+          this.emit('error', err)
+          pubChan.sendToQueue(
+            queue,
+            new Buffer(JSON.stringify(newData)),
+            this._getPublishOptions(),
+          )
+        } else {
+          this.emit('failure', err)
+          const queue = this._getQueueName('dead-letter-queue')
+          await this._ensureQueueExists(queue, pubChan)
+
+          pubChan.sendToQueue(
+            queue,
+            new Buffer(JSON.stringify(newData)),
+            this._getPublishOptions(),
+          )
+        }
       }
     })
   }
