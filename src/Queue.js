@@ -3,6 +3,7 @@
 import amqplib from 'amqplib'
 import Bluebird from 'bluebird'
 import { EventEmitter } from 'events'
+import crypto from 'crypto'
 
 import { connect } from './connections'
 
@@ -12,11 +13,15 @@ export type Options = {
 }
 
 type Job = {}
-type JobOpts = {}
+type JobOpts = {
+  timeout?: number,
+}
 
 type ProcessFnPromise = (job: Job) => Promise<any>
 type ProcessFnCallback = (job: Job, done: Function) => any
 type ProcessFn = ProcessFnPromise | ProcessFnCallback
+
+const DEFAULT_TIMEOUT = 60 * 1000
 
 function formatError(err: any) {
   if (typeof err === 'string') {
@@ -30,13 +35,17 @@ function formatError(err: any) {
   return { message: String(err) }
 }
 
+const generateCorrelationId = () => crypto.randomBytes(10).toString('base64')
+
 class Queue extends EventEmitter {
   _options: Options
   _name: string
   _conn: any // TODO types
   _publishChan: any // TODO types
-  _consumeChans: { [key: string]: any } = {} // TODO types
-  _queuesExist: { [key: string]: boolean } = {}
+  _consumeChans: { [key: string]: any } = Object.create(null) // TODO types
+  _queuesExist: { [key: string]: boolean } = Object.create(null)
+  _replyHandlers: Map<string, Function> = new Map()
+  _replyQueue: any
 
   constructor(
     name: string,
@@ -80,7 +89,7 @@ class Queue extends EventEmitter {
   }
 
   async _ensureConsumeChannelOpen(queue: string) {
-    if (!this._consumeChans[queue]) {
+    if (!(queue in this._consumeChans)) {
       this._consumeChans[
         queue
       ] = (await this._ensureConnection()).createChannel()
@@ -90,7 +99,7 @@ class Queue extends EventEmitter {
   }
 
   async _ensureQueueExists(queue: string, channel: any) {
-    if (!this._queuesExist[queue]) {
+    if (!(queue in this._queuesExist)) {
       await channel.assertQueue(queue)
       this._queuesExist[queue] = true
     }
@@ -187,14 +196,14 @@ class Queue extends EventEmitter {
         }
 
         if (newErrors.length < 3) {
-          this.emit('failure', err)
+          this.emit('single-failure', err)
           pubChan.sendToQueue(
             queue,
             new Buffer(JSON.stringify(newData)),
             this._getPublishOptions(),
           )
         } else {
-          this.emit('dropped', err)
+          this.emit('failure', err)
           const queue = this._getQueueName('dead-letter-queue')
           await this._ensureQueueExists(queue, pubChan)
 
@@ -208,6 +217,25 @@ class Queue extends EventEmitter {
     })
   }
 
+  async _fireJob(
+    name: ?string,
+    data: any,
+    opts?: JobOpts,
+    publishOptions: Object = {},
+  ) {
+    const chan = await this._ensurePublishChannelOpen()
+    const queue = this._getQueueName(name || this._name)
+    await this._ensureQueueExists(queue, chan)
+    chan.sendToQueue(queue, new Buffer(JSON.stringify(data)), {
+      ...this._getPublishOptions(),
+      ...publishOptions,
+    })
+
+    return {
+      queue,
+    }
+  }
+
   async add(name?: string, data: any, opts?: JobOpts) {
     if (typeof name !== 'string') {
       opts = data
@@ -215,14 +243,57 @@ class Queue extends EventEmitter {
       name = undefined
     }
 
-    const chan = await this._ensurePublishChannelOpen()
-    const queue = this._getQueueName(name || this._name)
-    await this._ensureQueueExists(queue, chan)
-    chan.sendToQueue(
-      queue,
-      new Buffer(JSON.stringify(data)),
-      this._getPublishOptions(),
-    )
+    await this._fireJob(name, data, opts)
+  }
+
+  async _ensureRpcQueue() {
+    if (!this._replyQueue) {
+      const chan = await this._ensureConsumeChannelOpen('$$reply')
+      const replyQueue = await chan.assertQueue('', { exclusive: true })
+
+      chan.consume(replyQueue.queue, (msg) => {
+        const correlationId = msg.properties.correlationId
+        const replyHandler = this._replyHandlers.get(correlationId)
+
+        if (replyHandler) {
+          replyHandler(JSON.parse(msg.content.toString()))
+          this._replyHandlers.delete(correlationId)
+        } else {
+          // WARN?
+        }
+      })
+
+      this._replyQueue = replyQueue
+    }
+
+    return this._replyQueue.queue
+  }
+
+  async call(name?: string, data: any, opts?: JobOpts) {
+    if (typeof name !== 'string') {
+      opts = data
+      data = name
+      name = undefined
+    }
+
+    const replyTo = await this._ensureRpcQueue()
+    const correlationId = generateCorrelationId()
+
+    const { queue } = await this._fireJob(name, data, opts, {
+      correlationId,
+      replyTo,
+    })
+
+    const timeout = (opts && opts.timeout) || DEFAULT_TIMEOUT
+
+    return await new Bluebird((resolve, reject) => {
+      this._replyHandlers.set(correlationId, resolve)
+    })
+      .timeout(timeout)
+      .catch(Bluebird.TimeoutError, (err) => {
+        this._replyHandlers.delete(correlationId)
+        return Promise.reject(new Error(`Timeout of ${timeout}ms exceeded`))
+      })
   }
 
   pause() {
