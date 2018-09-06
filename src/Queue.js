@@ -251,17 +251,23 @@ class Queue extends EventEmitter {
       const chan = await this._ensureConsumeChannelOpen('$$reply')
       const replyQueue = await chan.assertQueue('', { exclusive: true })
 
-      chan.consume(replyQueue.queue, (msg) => {
-        const correlationId = msg.properties.correlationId
-        const replyHandler = this._replyHandlers.get(correlationId)
+      chan.consume(
+        replyQueue.queue,
+        (msg) => {
+          const correlationId = msg.properties.correlationId
+          const replyHandler = this._replyHandlers.get(correlationId)
 
-        if (replyHandler) {
-          replyHandler(JSON.parse(msg.content.toString()))
-          this._replyHandlers.delete(correlationId)
-        } else {
-          // WARN?
-        }
-      })
+          if (replyHandler) {
+            replyHandler(JSON.parse(msg.content.toString()))
+            this._replyHandlers.delete(correlationId)
+          } else {
+            // WARN?
+          }
+        },
+        {
+          noAck: true,
+        },
+      )
 
       this._replyQueue = replyQueue
     }
