@@ -250,6 +250,7 @@ class Queue extends EventEmitter {
     if (!this._replyQueue) {
       const chan = await this._ensureConsumeChannelOpen('$$reply')
       const replyQueue = await chan.assertQueue('', { exclusive: true })
+      this._replyQueue = replyQueue
 
       chan.consume(
         replyQueue.queue,
@@ -268,8 +269,6 @@ class Queue extends EventEmitter {
           noAck: true,
         },
       )
-
-      this._replyQueue = replyQueue
     }
 
     return this._replyQueue.queue
