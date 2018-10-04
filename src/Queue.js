@@ -9,7 +9,7 @@ import { connect } from './connections'
 
 export type Options = {
   connectionString: string,
-  prefix?: string,
+  prefix: string,
 }
 
 type Job = {}
@@ -37,15 +37,34 @@ function formatError(err: any) {
 
 const generateCorrelationId = () => crypto.randomBytes(10).toString('base64')
 
+type QueuedMessage = {
+  queue: string,
+  content: Buffer,
+  options: Object,
+}
+
+type RegisteredConsumer = {
+  name: string,
+  handler: Function,
+  concurrency: number,
+}
+
+const DEFAULT_OPTIONS: $Shape<Options> = {
+  prefix: 'bull',
+}
+
 class Queue extends EventEmitter {
   _options: Options
   _name: string
   _conn: any // TODO types
   _publishChan: any // TODO types
-  _consumeChans: { [key: string]: any } = Object.create(null) // TODO types
-  _queuesExist: { [key: string]: boolean } = Object.create(null)
-  _replyHandlers: Map<string, Function> = new Map()
+  _consumeChans: { [key: string]: any }
+  _queuesExist: { [key: string]: boolean }
+  _replyHandlers: Map<string, Function>
   _replyQueue: any
+
+  _queuedMessages: Array<QueuedMessage>
+  _registeredConsumers: { [queue: string]: RegisteredConsumer }
 
   constructor(
     name: string,
@@ -59,6 +78,7 @@ class Queue extends EventEmitter {
     } else {
       // $FlowFixMe
       options = {
+        ...DEFAULT_OPTIONS,
         ...(options || {}),
         connectionString,
       }
@@ -70,11 +90,63 @@ class Queue extends EventEmitter {
 
     this._options = options
     this._name = name
+    this._resetToInitialState()
+  }
+
+  _resetToInitialState() {
+    this._publishChan = null
+    this._conn = null
+    this._consumeChans = Object.create(null)
+    this._queuesExist = Object.create(null)
+    this._replyHandlers = new Map()
+    this._replyQueue = null
+    this._queuedMessages = []
+    this._registeredConsumers = Object.create(null)
+  }
+
+  async _reconnect() {
+    // save old state
+    const queuedMessages = this._queuedMessages
+    const registeredConsumers = this._registeredConsumers
+
+    // purge old state
+    this._resetToInitialState()
+
+    try {
+      this._conn = await connect(this._options.connectionString)
+      this._conn.once('error', (err) => {
+        this._reconnect()
+      })
+
+      await this._ensureConnection()
+
+      // recover messages
+      for (const queuedMessage of queuedMessages) {
+        this._sendInternal(
+          queuedMessage.queue,
+          queuedMessage.content,
+          queuedMessage.options,
+        )
+      }
+
+      // recover consumers
+      for (const consumer of Object.values(registeredConsumers)) {
+        await this.process(
+          consumer.name,
+          consumer.concurrency,
+          consumer.handler,
+        )
+      }
+    } catch (err) {
+      this.emit('reconnect:error', err)
+      await Bluebird.delay(5000)
+      await this._reconnect()
+    }
   }
 
   async _ensureConnection() {
     if (!this._conn) {
-      this._conn = await connect(this._options.connectionString)
+      await this._reconnect()
     }
 
     return this._conn
@@ -106,7 +178,7 @@ class Queue extends EventEmitter {
   }
 
   _getQueueName(name: string) {
-    return (this._options.prefix || 'bull') + '-' + name
+    return this._options.prefix + '-' + name
   }
 
   _getPublishOptions() {
@@ -157,6 +229,12 @@ class Queue extends EventEmitter {
           }
 
     await this._ensureQueueExists(queue, chan)
+
+    this._registeredConsumers[queue] = {
+      name,
+      concurrency,
+      handler: promiseHandler,
+    }
 
     chan.consume(queue, async (msg) => {
       let data = {}
@@ -223,16 +301,31 @@ class Queue extends EventEmitter {
     opts?: JobOpts,
     publishOptions: Object = {},
   ) {
-    const chan = await this._ensurePublishChannelOpen()
     const queue = this._getQueueName(name || this._name)
-    await this._ensureQueueExists(queue, chan)
-    chan.sendToQueue(queue, new Buffer(JSON.stringify(data)), {
+    const content = new Buffer(JSON.stringify(data))
+    const publishOpts = {
       ...this._getPublishOptions(),
       ...publishOptions,
-    })
+    }
+
+    await this._sendInternal(queue, content, publishOpts)
 
     return {
       queue,
+    }
+  }
+
+  async _sendInternal(queue: string, content: Buffer, opts: Object) {
+    if (this._conn) {
+      const chan = await this._ensurePublishChannelOpen()
+      await this._ensureQueueExists(queue, chan)
+      chan.sendToQueue(queue, content, opts)
+    } else {
+      this._queuedMessages.push({
+        content,
+        queue,
+        options: opts,
+      })
     }
   }
 
