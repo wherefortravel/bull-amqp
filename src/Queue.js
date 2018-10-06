@@ -309,6 +309,7 @@ class Queue extends EventEmitter {
     }
 
     await this._sendInternal(queue, content, publishOpts)
+    await this._reconnect()
 
     return {
       queue,
