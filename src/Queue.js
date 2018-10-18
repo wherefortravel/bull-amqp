@@ -17,6 +17,8 @@ type JobOpts = {
   timeout?: number,
 }
 
+type Chan = any
+
 type ProcessFnPromise = (job: Job) => Promise<any>
 type ProcessFnCallback = (job: Job, done: Function) => any
 type ProcessFn = ProcessFnPromise | ProcessFnCallback
@@ -56,9 +58,9 @@ const DEFAULT_OPTIONS: $Shape<Options> = {
 class Queue extends EventEmitter {
   _options: Options
   _name: string
-  _conn: any // TODO types
+  _conn: Promise<any> // TODO types
   _publishChan: any // TODO types
-  _consumeChans: { [key: string]: any }
+  _consumeChans: { [key: string]: Promise<Chan> }
   _queuesExist: { [key: string]: boolean }
   _replyHandlers: Map<string, Function>
   _replyQueue: any
@@ -113,8 +115,9 @@ class Queue extends EventEmitter {
     this._resetToInitialState()
 
     try {
-      this._conn = await connect(this._options.connectionString)
-      this._conn.once('error', (err) => {
+      this._conn = connect(this._options.connectionString)
+      const conn = await this._conn
+      conn.once('error', (err) => {
         this._reconnect()
       })
 
@@ -149,31 +152,35 @@ class Queue extends EventEmitter {
       await this._reconnect()
     }
 
-    return this._conn
+    return await this._conn
   }
 
-  async _ensurePublishChannelOpen() {
+  _ensurePublishChannelOpen(): Promise<Chan> {
     if (!this._publishChan) {
-      this._publishChan = (await this._ensureConnection()).createChannel()
+      this._publishChan = this._createNewChannelInternal()
     }
 
     return this._publishChan
   }
 
+  async _createNewChannelInternal(): Promise<Chan> {
+    return (await this._ensureConnection()).createChannel()
+  }
+
   async _ensureConsumeChannelOpen(queue: string) {
     if (!(queue in this._consumeChans)) {
-      this._consumeChans[
-        queue
-      ] = (await this._ensureConnection()).createChannel()
+      const promise = this._createNewChannelInternal()
+      this._consumeChans[queue] = promise
     }
 
-    return this._consumeChans[queue]
+    return await this._consumeChans[queue]
   }
 
   async _ensureQueueExists(queue: string, channel: any) {
     if (!(queue in this._queuesExist)) {
-      await channel.assertQueue(queue)
+      const promise = channel.assertQueue(queue)
       this._queuesExist[queue] = true
+      await promise
     }
   }
 
@@ -302,7 +309,7 @@ class Queue extends EventEmitter {
     publishOptions: Object = {},
   ) {
     const queue = this._getQueueName(name || this._name)
-    const content = new Buffer(JSON.stringify(data))
+    const content = Buffer.from(JSON.stringify(data), 'utf8')
     const publishOpts = {
       ...this._getPublishOptions(),
       ...publishOptions,
@@ -340,14 +347,20 @@ class Queue extends EventEmitter {
     await this._fireJob(name, data, opts)
   }
 
+  async _ensureRpcQueueInternal() {
+    const chan = await this._ensureConsumeChannelOpen('$$reply')
+    const queue = await chan.assertQueue('', { exclusive: true })
+    return { chan, queue }
+  }
+
   async _ensureRpcQueue() {
     if (!this._replyQueue) {
-      const chan = await this._ensureConsumeChannelOpen('$$reply')
-      this._replyQueue = chan.assertQueue('', { exclusive: true })
+      this._replyQueue = this._ensureRpcQueueInternal()
+
       const replyQueue = await this._replyQueue
 
-      chan.consume(
-        replyQueue.queue,
+      replyQueue.chan.consume(
+        replyQueue.queue.queue,
         (msg) => {
           const correlationId = msg.properties.correlationId
           const replyHandler = this._replyHandlers.get(correlationId)
@@ -365,7 +378,7 @@ class Queue extends EventEmitter {
       )
     }
 
-    return await this._replyQueue
+    return (await this._replyQueue).queue.queue
   }
 
   async call(name?: string, data: any, opts?: JobOpts) {
