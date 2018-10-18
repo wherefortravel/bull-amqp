@@ -343,8 +343,8 @@ class Queue extends EventEmitter {
   async _ensureRpcQueue() {
     if (!this._replyQueue) {
       const chan = await this._ensureConsumeChannelOpen('$$reply')
-      const replyQueue = await chan.assertQueue('', { exclusive: true })
-      this._replyQueue = replyQueue
+      this._replyQueue = chan.assertQueue('', { exclusive: true })
+      const replyQueue = await this._replyQueue
 
       chan.consume(
         replyQueue.queue,
@@ -365,7 +365,7 @@ class Queue extends EventEmitter {
       )
     }
 
-    return this._replyQueue.queue
+    return await this._replyQueue
   }
 
   async call(name?: string, data: any, opts?: JobOpts) {
