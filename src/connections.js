@@ -19,6 +19,10 @@ export async function connect(connectionString: string) {
     conn.once('error', (err) => {
       connections[connectionString] = null
     })
+
+    conn.once('close', (err) => {
+      connections[connectionString] = null
+    })
   }
 
   return await connection

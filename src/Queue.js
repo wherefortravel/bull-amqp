@@ -121,6 +121,10 @@ class Queue extends EventEmitter {
         this._reconnect()
       })
 
+      conn.once('close', (err) => {
+        this._reconnect()
+      })
+
       await this._ensureConnection()
 
       // recover messages
