@@ -12,17 +12,11 @@ export async function connect(connectionString: string) {
       connectionString,
       {
         noDelay: true, // disable nagle
+        heartbeat: 1,
       },
     )
     connections[connectionString] = connection
-    const conn = await connection
-    conn.once('error', (err) => {
-      connections[connectionString] = null
-    })
-
-    conn.once('close', (err) => {
-      connections[connectionString] = null
-    })
+    await connection
   }
 
   return await connection

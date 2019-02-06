@@ -5,7 +5,7 @@ import Bluebird from 'bluebird'
 import { EventEmitter } from 'events'
 import crypto from 'crypto'
 
-import { connect } from './connections'
+import { connect, purge } from './connections'
 
 export type Options = {
   connectionString: string,
@@ -68,11 +68,7 @@ class Queue extends EventEmitter {
   _queuedMessages: Array<QueuedMessage>
   _registeredConsumers: { [queue: string]: RegisteredConsumer }
 
-  constructor(
-    name: string,
-    connectionString: string,
-    options?: Options | string,
-  ) {
+  constructor(name: string, connectionString: string, options?: Options | string) {
     super()
 
     if (typeof connectionString === 'object') {
@@ -93,6 +89,7 @@ class Queue extends EventEmitter {
     this._options = options
     this._name = name
     this._resetToInitialState()
+    this._resetPersistState()
   }
 
   _resetToInitialState() {
@@ -102,6 +99,9 @@ class Queue extends EventEmitter {
     this._queuesExist = Object.create(null)
     this._replyHandlers = new Map()
     this._replyQueue = null
+  }
+
+  _resetPersistState() {
     this._queuedMessages = []
     this._registeredConsumers = Object.create(null)
   }
@@ -115,34 +115,31 @@ class Queue extends EventEmitter {
     this._resetToInitialState()
 
     try {
+      purge(this._options.connectionString)
       this._conn = connect(this._options.connectionString)
       const conn = await this._conn
       conn.once('error', (err) => {
+        this.emit('connection:error', err)
         this._reconnect()
       })
 
       conn.once('close', (err) => {
+        this.emit('connection:close', err)
         this._reconnect()
       })
 
       await this._ensureConnection()
 
+      this._resetPersistState()
+
       // recover messages
       for (const queuedMessage of queuedMessages) {
-        this._sendInternal(
-          queuedMessage.queue,
-          queuedMessage.content,
-          queuedMessage.options,
-        )
+        this._sendInternal(queuedMessage.queue, queuedMessage.content, queuedMessage.options)
       }
 
       // recover consumers
       for (const consumer of Object.values(registeredConsumers)) {
-        await this.process(
-          consumer.name,
-          consumer.concurrency,
-          consumer.handler,
-        )
+        await this.process(consumer.name, consumer.concurrency, consumer.handler)
       }
     } catch (err) {
       this.emit('reconnect:error', err)
@@ -264,13 +261,9 @@ class Queue extends EventEmitter {
           typeof msg.properties.replyTo !== 'undefined' &&
           typeof msg.properties.correlationId !== 'undefined'
         ) {
-          chan.sendToQueue(
-            msg.properties.replyTo,
-            new Buffer(JSON.stringify(result)),
-            {
-              correlationId: msg.properties.correlationId,
-            },
-          )
+          chan.sendToQueue(msg.properties.replyTo, new Buffer(JSON.stringify(result)), {
+            correlationId: msg.properties.correlationId,
+          })
         }
 
         chan.ack(msg)
@@ -286,32 +279,19 @@ class Queue extends EventEmitter {
 
         if (newErrors.length < 3) {
           this.emit('single-failure', err)
-          pubChan.sendToQueue(
-            queue,
-            new Buffer(JSON.stringify(newData)),
-            this._getPublishOptions(),
-          )
+          pubChan.sendToQueue(queue, new Buffer(JSON.stringify(newData)), this._getPublishOptions())
         } else {
           this.emit('failure', err)
           const queue = this._getQueueName('dead-letter-queue')
           await this._ensureQueueExists(queue, pubChan)
 
-          pubChan.sendToQueue(
-            queue,
-            new Buffer(JSON.stringify(newData)),
-            this._getPublishOptions(),
-          )
+          pubChan.sendToQueue(queue, new Buffer(JSON.stringify(newData)), this._getPublishOptions())
         }
       }
     })
   }
 
-  async _fireJob(
-    name: ?string,
-    data: any,
-    opts?: JobOpts,
-    publishOptions: Object = {},
-  ) {
+  async _fireJob(name: ?string, data: any, opts?: JobOpts, publishOptions: Object = {}) {
     const queue = this._getQueueName(name || this._name)
     const content = Buffer.from(JSON.stringify(data), 'utf8')
     const publishOpts = {
