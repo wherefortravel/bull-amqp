@@ -4,8 +4,7 @@ import amqplib from 'amqplib'
 import Bluebird from 'bluebird'
 import { EventEmitter } from 'events'
 import crypto from 'crypto'
-
-import { connect, purge } from './connections'
+import connections from 'amqp-connection-manager'
 
 export type Options = {
   connectionString: string,
@@ -39,12 +38,6 @@ function formatError(err: any) {
 
 const generateCorrelationId = () => crypto.randomBytes(10).toString('base64')
 
-type QueuedMessage = {
-  queue: string,
-  content: Buffer,
-  options: Object,
-}
-
 type RegisteredConsumer = {
   name: string,
   handler: Function,
@@ -58,15 +51,12 @@ const DEFAULT_OPTIONS: $Shape<Options> = {
 class Queue extends EventEmitter {
   _options: Options
   _name: string
-  _conn: Promise<any> // TODO types
-  _publishChan: any // TODO types
-  _consumeChans: { [key: string]: Promise<Chan> }
+  _conn: any
+  _chan: Chan
+  _consumeChan: { [key: string]: Chan }
   _queuesExist: { [key: string]: boolean }
   _replyHandlers: Map<string, Function>
-  _replyQueue: any
-
-  _queuedMessages: Array<QueuedMessage>
-  _registeredConsumers: { [queue: string]: RegisteredConsumer }
+  _replyQueue: ?Promise<string>
 
   constructor(name: string, connectionString: string, options?: Options | string) {
     super()
@@ -88,98 +78,45 @@ class Queue extends EventEmitter {
 
     this._options = options
     this._name = name
-    this._resetToInitialState()
-    this._resetPersistState()
+    this._setup()
   }
 
   _resetToInitialState() {
-    this._publishChan = null
+    this._chan = null
     this._conn = null
-    this._consumeChans = Object.create(null)
     this._queuesExist = Object.create(null)
+    this._consumeChan = Object.create(null)
     this._replyHandlers = new Map()
     this._replyQueue = null
   }
 
-  _resetPersistState() {
-    this._queuedMessages = []
-    this._registeredConsumers = Object.create(null)
-  }
+  async _setup() {
+    if (this._conn) {
+      return
+    }
 
-  async _reconnect() {
-    // save old state
-    const queuedMessages = this._queuedMessages
-    const registeredConsumers = this._registeredConsumers
-
-    // purge old state
     this._resetToInitialState()
 
-    try {
-      purge(this._options.connectionString)
-      this._conn = connect(this._options.connectionString)
-      const conn = await this._conn
-      conn.once('error', (err) => {
-        this.emit('connection:error', err)
-        this._reconnect()
-      })
+    this._conn = connections.connect(this._options.connectionString)
+    const conn = this._conn
 
-      conn.once('close', (err) => {
-        this.emit('connection:close', err)
-        this._reconnect()
-      })
+    this._chan = conn.createChannel()
 
-      await this._ensureConnection()
+    conn.on('error', (err) => {
+      this.emit('connection:error', err)
+    })
 
-      this._resetPersistState()
-
-      // recover messages
-      for (const queuedMessage of queuedMessages) {
-        this._sendInternal(queuedMessage.queue, queuedMessage.content, queuedMessage.options)
-      }
-
-      // recover consumers
-      for (const consumer of Object.values(registeredConsumers)) {
-        await this.process(consumer.name, consumer.concurrency, consumer.handler)
-      }
-    } catch (err) {
-      this.emit('reconnect:error', err)
-      await Bluebird.delay(5000)
-      await this._reconnect()
-    }
-  }
-
-  async _ensureConnection() {
-    if (!this._conn) {
-      await this._reconnect()
-    }
-
-    return await this._conn
-  }
-
-  _ensurePublishChannelOpen(): Promise<Chan> {
-    if (!this._publishChan) {
-      this._publishChan = this._createNewChannelInternal()
-    }
-
-    return this._publishChan
-  }
-
-  async _createNewChannelInternal(): Promise<Chan> {
-    return (await this._ensureConnection()).createChannel()
-  }
-
-  async _ensureConsumeChannelOpen(queue: string) {
-    if (!(queue in this._consumeChans)) {
-      const promise = this._createNewChannelInternal()
-      this._consumeChans[queue] = promise
-    }
-
-    return await this._consumeChans[queue]
+    conn.on('close', (err) => {
+      this.emit('connection:close', err)
+    })
   }
 
   async _ensureQueueExists(queue: string, channel: any) {
     if (!(queue in this._queuesExist)) {
-      const promise = channel.assertQueue(queue)
+      async function setup(chan) {
+        await chan.assertQueue(queue)
+      }
+      const promise = this._chan._runOnce(setup)
       this._queuesExist[queue] = true
       await promise
     }
@@ -193,6 +130,14 @@ class Queue extends EventEmitter {
     return {
       persistent: true, // TODO
     }
+  }
+
+  _ensureConsumeChannelOpen(queue: string) {
+    if (!(queue in this._consumeChan)) {
+      this._consumeChan[queue] = this._conn.createChannel()
+    }
+
+    return this._consumeChan[queue]
   }
 
   async process(name?: string, concurrency?: number, handler: ProcessFn) {
@@ -216,8 +161,7 @@ class Queue extends EventEmitter {
     }
 
     const queue = this._getQueueName(name || this._name)
-    const chan = await this._ensureConsumeChannelOpen(queue)
-    await chan.prefetch(concurrency)
+    const chan = this._ensureConsumeChannelOpen(queue)
 
     const promiseHandler: ProcessFnPromise =
       // $FlowFixMe
@@ -238,56 +182,61 @@ class Queue extends EventEmitter {
 
     await this._ensureQueueExists(queue, chan)
 
-    this._registeredConsumers[queue] = {
-      name,
-      concurrency,
-      handler: promiseHandler,
-    }
+    chan.addSetup(async (chan) => {
+      await chan.prefetch(concurrency)
+      chan.consume(queue, async (msg) => {
+        let data = {}
+        try {
+          data = JSON.parse(msg.content.toString())
 
-    chan.consume(queue, async (msg) => {
-      let data = {}
-      try {
-        data = JSON.parse(msg.content.toString())
+          const job = {
+            data,
+          }
+          const result = await promiseHandler(job)
 
-        const job = {
-          data,
+          // see if we need to reply
+          if (
+            typeof result !== 'undefined' &&
+            typeof msg.properties === 'object' &&
+            typeof msg.properties.replyTo !== 'undefined' &&
+            typeof msg.properties.correlationId !== 'undefined'
+          ) {
+            chan.sendToQueue(msg.properties.replyTo, Buffer.from(JSON.stringify(result), 'utf8'), {
+              correlationId: msg.properties.correlationId,
+            })
+          }
+
+          chan.ack(msg)
+        } catch (err) {
+          chan.nack(msg, false, false)
+          const pubChan = this._chan
+          const errors = data['$$errors'] || []
+          const newErrors = [...errors, formatError(err)]
+          const newData = {
+            ...data,
+            ['$$errors']: newErrors,
+          }
+
+          if (newErrors.length < 3) {
+            this.emit('single-failure', err)
+            pubChan.sendToQueue(
+              queue,
+              new Buffer(JSON.stringify(newData)),
+              this._getPublishOptions(),
+            )
+          } else {
+            this.emit('failure', err)
+            const queue = this._getQueueName('dead-letter-queue')
+            await this._ensureQueueExists(queue, pubChan)
+
+            pubChan.sendToQueue(
+              queue,
+              new Buffer(JSON.stringify(newData)),
+              this._getPublishOptions(),
+            )
+          }
         }
-        const result = await promiseHandler(job)
-
-        // see if we need to reply
-        if (
-          typeof result !== 'undefined' &&
-          typeof msg.properties === 'object' &&
-          typeof msg.properties.replyTo !== 'undefined' &&
-          typeof msg.properties.correlationId !== 'undefined'
-        ) {
-          chan.sendToQueue(msg.properties.replyTo, new Buffer(JSON.stringify(result)), {
-            correlationId: msg.properties.correlationId,
-          })
-        }
-
-        chan.ack(msg)
-      } catch (err) {
-        chan.nack(msg, false, false)
-        const pubChan = await this._ensurePublishChannelOpen()
-        const errors = data['$$errors'] || []
-        const newErrors = [...errors, formatError(err)]
-        const newData = {
-          ...data,
-          ['$$errors']: newErrors,
-        }
-
-        if (newErrors.length < 3) {
-          this.emit('single-failure', err)
-          pubChan.sendToQueue(queue, new Buffer(JSON.stringify(newData)), this._getPublishOptions())
-        } else {
-          this.emit('failure', err)
-          const queue = this._getQueueName('dead-letter-queue')
-          await this._ensureQueueExists(queue, pubChan)
-
-          pubChan.sendToQueue(queue, new Buffer(JSON.stringify(newData)), this._getPublishOptions())
-        }
-      }
+      })
     })
   }
 
@@ -300,7 +249,6 @@ class Queue extends EventEmitter {
     }
 
     await this._sendInternal(queue, content, publishOpts)
-    await this._ensureConnection()
 
     return {
       queue,
@@ -308,17 +256,9 @@ class Queue extends EventEmitter {
   }
 
   async _sendInternal(queue: string, content: Buffer, opts: Object) {
-    if (this._conn) {
-      const chan = await this._ensurePublishChannelOpen()
-      await this._ensureQueueExists(queue, chan)
-      chan.sendToQueue(queue, content, opts)
-    } else {
-      this._queuedMessages.push({
-        content,
-        queue,
-        options: opts,
-      })
-    }
+    const chan = this._chan
+    await this._ensureQueueExists(queue, chan)
+    chan.sendToQueue(queue, content, opts)
   }
 
   async add(name?: string, data: any, opts?: JobOpts) {
@@ -331,38 +271,52 @@ class Queue extends EventEmitter {
     await this._fireJob(name, data, opts)
   }
 
-  async _ensureRpcQueueInternal() {
-    const chan = await this._ensureConsumeChannelOpen('$$reply')
-    const queue = await chan.assertQueue('', { exclusive: true })
-    return { chan, queue }
-  }
-
-  async _ensureRpcQueue() {
+  async _ensureRpcQueueInternal(): Promise<string> {
     if (!this._replyQueue) {
-      this._replyQueue = this._ensureRpcQueueInternal()
+      let _resolve
+      this._replyQueue = new Promise((resolve, reject) => {
+        _resolve = resolve
+      })
 
-      const replyQueue = await this._replyQueue
+      async function setup(chan) {
+        const q = await chan.assertQueue('', { exclusive: true })
+        _resolve(q.queue)
+      }
 
-      replyQueue.chan.consume(
-        replyQueue.queue.queue,
-        (msg) => {
-          const correlationId = msg.properties.correlationId
-          const replyHandler = this._replyHandlers.get(correlationId)
-
-          if (replyHandler) {
-            replyHandler(JSON.parse(msg.content.toString()))
-            this._replyHandlers.delete(correlationId)
-          } else {
-            // WARN?
-          }
-        },
-        {
-          noAck: true,
-        },
-      )
+      await this._chan._runOnce(setup)
     }
 
-    return (await this._replyQueue).queue.queue
+    return await this._replyQueue
+  }
+
+  async _ensureRpcQueue(): Promise<string> {
+    if (!this._replyQueue) {
+      const replyQueue = await this._ensureRpcQueueInternal()
+
+      async function setup(chan) {
+        chan.consume(
+          replyQueue,
+          (msg) => {
+            const correlationId = msg.properties.correlationId
+            const replyHandler = this._replyHandlers.get(correlationId)
+
+            if (replyHandler) {
+              replyHandler(JSON.parse(msg.content.toString()))
+              this._replyHandlers.delete(correlationId)
+            } else {
+              // WARN?
+            }
+          },
+          {
+            noAck: true,
+          },
+        )
+      }
+
+      await this._chan._runOnce(setup)
+    }
+
+    return await this._replyQueue
   }
 
   async call(name?: string, data: any, opts?: JobOpts) {
@@ -371,7 +325,6 @@ class Queue extends EventEmitter {
       data = name
       name = undefined
     }
-
     const replyTo = await this._ensureRpcQueue()
     const correlationId = generateCorrelationId()
 

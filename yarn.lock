@@ -6,6 +6,13 @@ abbrev@1:
   version "1.1.1"
   resolved "https://registry.yarnpkg.com/abbrev/-/abbrev-1.1.1.tgz#f8f2c887ad10bf67f634f005b6987fed3179aac8"
 
+amqp-connection-manager@^2.3.0:
+  version "2.3.0"
+  resolved "http://npm-repo.node.aws.w2:4873/amqp-connection-manager/-/amqp-connection-manager-2.3.0.tgz#bb6650479cb5df9952b365a8f55fa93e32d7edd6"
+  integrity sha512-DvebklFknBkareuf3wxE9X1Eo7l0UK1MgeO9m4B2T/h0OvzLRYsXTtQ8OrkXfgkg98FgKRRR9Nyz9+86aJFEaQ==
+  dependencies:
+    promise-breaker "^4.1.2"
+
 amqplib@^0.5.2:
   version "0.5.2"
   resolved "https://registry.yarnpkg.com/amqplib/-/amqplib-0.5.2.tgz#d2d7313c7ffaa4d10bcf1e6252de4591b6cc7b63"
@@ -1250,6 +1257,11 @@ private@^0.1.6, private@^0.1.8:
 process-nextick-args@~2.0.0:
   version "2.0.0"
   resolved "https://registry.yarnpkg.com/process-nextick-args/-/process-nextick-args-2.0.0.tgz#a37d732f4271b4ab1ad070d35508e8290788ffaa"
+
+promise-breaker@^4.1.2:
+  version "4.1.13"
+  resolved "http://npm-repo.node.aws.w2:4873/promise-breaker/-/promise-breaker-4.1.13.tgz#fe57ad0a1f14912682942391de1e6a2b4e2e447b"
+  integrity sha512-+lGBqmBEgyvKweIrK4smdN1YxdYp5YjSL1us2XhTMBbZf98jdeGys/Edt5S1b1NXMVRQrvh4DrMgGpYPbXZf3g==
 
 randomatic@^3.0.0:
   version "3.0.0"
