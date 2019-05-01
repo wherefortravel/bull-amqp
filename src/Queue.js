@@ -201,7 +201,7 @@ class Queue extends EventEmitter {
             typeof msg.properties.replyTo !== 'undefined' &&
             typeof msg.properties.correlationId !== 'undefined'
           ) {
-            chan.sendToQueue(msg.properties.replyTo, Buffer.from(JSON.stringify(result), 'utf8'), {
+            await chan.sendToQueue(msg.properties.replyTo, Buffer.from(JSON.stringify(result), 'utf8'), {
               correlationId: msg.properties.correlationId,
             })
           }
@@ -219,7 +219,7 @@ class Queue extends EventEmitter {
 
           if (newErrors.length < 3) {
             this.emit('single-failure', err)
-            pubChan.sendToQueue(
+            await pubChan.sendToQueue(
               queue,
               new Buffer(JSON.stringify(newData)),
               this._getPublishOptions(),
@@ -229,7 +229,7 @@ class Queue extends EventEmitter {
             const queue = this._getQueueName('dead-letter-queue')
             await this._ensureQueueExists(queue, pubChan)
 
-            pubChan.sendToQueue(
+            await pubChan.sendToQueue(
               queue,
               new Buffer(JSON.stringify(newData)),
               this._getPublishOptions(),
@@ -258,7 +258,7 @@ class Queue extends EventEmitter {
   async _sendInternal(queue: string, content: Buffer, opts: Object) {
     const chan = this._chan
     await this._ensureQueueExists(queue, chan)
-    chan.sendToQueue(queue, content, opts)
+    return chan.sendToQueue(queue, content, opts)
   }
 
   async add(name?: string, data: any, opts?: JobOpts) {
