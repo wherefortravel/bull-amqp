@@ -9,7 +9,8 @@
   "dependencies": {
     "amqp-connection-manager": "^2.3.0",
     "amqplib": "^0.5.2",
-    "bluebird": "^3.5.1"
+    "bluebird": "^3.5.1",
+    "lodash": "^4.17.13"
   },
   "scripts": {
     "build": "rm -rf ./lib && babel src --out-dir lib --copy-files"
