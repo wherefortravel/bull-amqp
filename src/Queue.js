@@ -102,7 +102,6 @@ class Queue extends EventEmitter {
       reconnectTimeInSeconds: 5,
     })
     const conn = this._conn
-    const conn = this._conn
 
     this._chan = conn.createChannel()
 

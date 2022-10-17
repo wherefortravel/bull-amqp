@@ -16,10 +16,10 @@ abbrev@1:
   resolved "https://registry.yarnpkg.com/abbrev/-/abbrev-1.1.1.tgz#f8f2c887ad10bf67f634f005b6987fed3179aac8"
   integrity sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q==
 
-amqp-connection-manager@3.9.0:
-  version "3.9.0"
-  resolved "https://registry.yarnpkg.com/amqp-connection-manager/-/amqp-connection-manager-3.9.0.tgz#aebebfebd506449b0831e2669d5f89005534392e"
-  integrity sha512-ZKw9ckJKz40Lc2pC7DY0NVocpzPalMaCgv0sBn+N4er2QFAJul9pIiMOm/FsPHeCzB+FulV7PckOpmZvWvewGQ==
+amqp-connection-manager@2.3.3:
+  version "2.3.3"
+  resolved "https://registry.yarnpkg.com/amqp-connection-manager/-/amqp-connection-manager-2.3.3.tgz#26a72c5e37554b119300495aebc31e668eec4a86"
+  integrity sha512-sYp323H2EtW9oopoKyGEdXjXbdzlE5fWyc+w6dvCHKd/sGIersEu2CNz3PE1oGyZmJC/GXRK4AtQCnVi/znYpg==
   dependencies:
     promise-breaker "^5.0.0"
 
