@@ -1,9 +1,8 @@
 {
   "name": "bull-amqp",
-  "version": "1.8.3",
+  "version": "1.8.4",
   "description": "A (almost) drop-in replacement for the Bull queue, backed by the AMQP protocol",
-  "main": "src/index.js",
-  "type": "module",
+  "main": "lib/index.js",
   "repository": "https://github.com/wherefortravel/bull-amqp",
   "author": "David Xu",
   "license": "MIT",
