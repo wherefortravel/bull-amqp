@@ -98,9 +98,7 @@ class Queue extends EventEmitter {
     this._resetToInitialState()
 
     console.warn('rx-queue-setup')
-    this._conn = connections.connect(this._options.connectionString, {
-      reconnectTimeInSeconds: 5,
-    })
+    this._conn = connections.connect(this._options.connectionString)
     const conn = this._conn
 
     this._chan = conn.createChannel()
