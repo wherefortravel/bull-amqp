@@ -16,12 +16,12 @@ abbrev@1:
   resolved "https://registry.yarnpkg.com/abbrev/-/abbrev-1.1.1.tgz#f8f2c887ad10bf67f634f005b6987fed3179aac8"
   integrity sha512-nne9/IiQ/hzIhY6pdDnbBtz7DjPTKrY00P/zvPSm5pOFkl6xuGrGnXn/VtTNNfNtAfZ9/1RtehkszU9qcTii0Q==
 
-amqp-connection-manager@4.1.7:
-  version "4.1.7"
-  resolved "https://registry.yarnpkg.com/amqp-connection-manager/-/amqp-connection-manager-4.1.7.tgz#8dcd0858a45a3845537a7ca1ae7c5c12032d9b96"
-  integrity sha512-CbNev3Nr8rIzngwrpfWlgUqgJzSwA2cUNe6vMfNTzeKfShpkr4ZsUDadKY4nzbBrZC0s+lravXmlNg6eEzP7EQ==
+amqp-connection-manager@^2.3.0:
+  version "2.3.3"
+  resolved "https://registry.yarnpkg.com/amqp-connection-manager/-/amqp-connection-manager-2.3.3.tgz#26a72c5e37554b119300495aebc31e668eec4a86"
+  integrity sha512-sYp323H2EtW9oopoKyGEdXjXbdzlE5fWyc+w6dvCHKd/sGIersEu2CNz3PE1oGyZmJC/GXRK4AtQCnVi/znYpg==
   dependencies:
-    promise-breaker "^6.0.0"
+    promise-breaker "^5.0.0"
 
 amqplib@0.10.3:
   version "0.10.3"
@@ -1873,10 +1873,10 @@ process-nextick-args@~2.0.0:
   resolved "https://registry.yarnpkg.com/process-nextick-args/-/process-nextick-args-2.0.1.tgz#7820d9b16120cc55ca9ae7792680ae7dba6d7fe2"
   integrity sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==
 
-promise-breaker@^6.0.0:
-  version "6.0.0"
-  resolved "https://registry.yarnpkg.com/promise-breaker/-/promise-breaker-6.0.0.tgz#107d2b70f161236abdb4ac5a736c7eb8df489d0f"
-  integrity sha512-BthzO9yTPswGf7etOBiHCVuugs2N01/Q/94dIPls48z2zCmrnDptUUZzfIb+41xq0MnYZ/BzmOd6ikDR4ibNZA==
+promise-breaker@^5.0.0:
+  version "5.0.0"
+  resolved "https://registry.yarnpkg.com/promise-breaker/-/promise-breaker-5.0.0.tgz#58e8541f1619554057da95a211794d7834d30c1d"
+  integrity sha512-mgsWQuG4kJ1dtO6e/QlNDLFtMkMzzecsC69aI5hlLEjGHFNpHrvGhFi4LiK5jg2SMQj74/diH+wZliL9LpGsyA==
 
 querystringify@^2.1.1:
   version "2.1.1"
