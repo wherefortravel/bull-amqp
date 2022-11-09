@@ -292,17 +292,17 @@ class Queue extends EventEmitter {
   async _ensureRpcQueue(): Promise<string> {
     if (!this._replyQueue) {
       const replyQueue = await this._ensureRpcQueueInternal()
-
+      const replyHandlers = this._replyHandlers
       async function setup(chan) {
         chan.consume(
           replyQueue,
           (msg) => {
             const correlationId = msg.properties.correlationId
-            const replyHandler = this._replyHandlers.get(correlationId)
+            const replyHandler = replyHandlers.get(correlationId)
 
             if (replyHandler) {
               replyHandler(JSON.parse(msg.content.toString()))
-              this._replyHandlers.delete(correlationId)
+              replyHandlers.delete(correlationId)
             } else {
               // WARN?
             }
