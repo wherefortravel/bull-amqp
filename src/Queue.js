@@ -48,6 +48,10 @@ const DEFAULT_OPTIONS: $Shape<Options> = {
   prefix: 'bull',
 }
 
+const runOnceForChannel = (channel: Chan, fn): Promise<any> => {
+  return channel.waitForConnect().then(() => fn(channel._channel))
+}
+
 class Queue extends EventEmitter {
   _options: Options
   _name: string
@@ -116,7 +120,7 @@ class Queue extends EventEmitter {
       async function setup(chan) {
         await chan.assertQueue(queue)
       }
-      const promise = this._chan._runOnce(setup)
+      const promise = runOnceForChannel(this._chan, setup)
       this._queuesExist[queue] = true
       await promise
     }
@@ -283,7 +287,7 @@ class Queue extends EventEmitter {
         _resolve(q.queue)
       }
 
-      await this._chan._runOnce(setup)
+      await runOnceForChannel(this._chan, setup)
     }
 
     return await this._replyQueue
@@ -313,7 +317,7 @@ class Queue extends EventEmitter {
         )
       }
 
-      await this._chan._runOnce(setup)
+      await runOnceForChannel(this._chan, setup)
     }
 
     return await this._replyQueue
