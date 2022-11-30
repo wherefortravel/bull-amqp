@@ -48,6 +48,10 @@ const DEFAULT_OPTIONS: $Shape<Options> = {
   prefix: 'bull',
 }
 
+const runOnceForChannel = (channel: Chan, fn): Promise<any> => {
+  return channel.waitForConnect().then(() => fn(channel._channel))
+}
+
 class Queue extends EventEmitter {
   _options: Options
   _name: string
@@ -116,7 +120,7 @@ class Queue extends EventEmitter {
       async function setup(chan) {
         await chan.assertQueue(queue)
       }
-      const promise = this._chan._runOnce(setup)
+      const promise = runOnceForChannel(this._chan, setup)
       this._queuesExist[queue] = true
       await promise
     }
@@ -283,7 +287,7 @@ class Queue extends EventEmitter {
         _resolve(q.queue)
       }
 
-      await this._chan._runOnce(setup)
+      await runOnceForChannel(this._chan, setup)
     }
 
     return await this._replyQueue
@@ -292,17 +296,17 @@ class Queue extends EventEmitter {
   async _ensureRpcQueue(): Promise<string> {
     if (!this._replyQueue) {
       const replyQueue = await this._ensureRpcQueueInternal()
-
+      const replyHandlers = this._replyHandlers
       async function setup(chan) {
         chan.consume(
           replyQueue,
           (msg) => {
             const correlationId = msg.properties.correlationId
-            const replyHandler = this._replyHandlers.get(correlationId)
+            const replyHandler = replyHandlers.get(correlationId)
 
             if (replyHandler) {
               replyHandler(JSON.parse(msg.content.toString()))
-              this._replyHandlers.delete(correlationId)
+              replyHandlers.delete(correlationId)
             } else {
               // WARN?
             }
@@ -313,7 +317,7 @@ class Queue extends EventEmitter {
         )
       }
 
-      await this._chan._runOnce(setup)
+      await runOnceForChannel(this._chan, setup)
     }
 
     return await this._replyQueue
