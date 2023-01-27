@@ -106,6 +106,12 @@ class Queue extends EventEmitter {
 
     this._chan = conn.createChannel()
 
+    conn.on('connect', (_conn) => {
+      // after reconnect we need to reset _replyQueue to restore work of .call
+      // otherwise await this._replyQueue - will stuck
+      this._replyQueue = null
+    })
+
     conn.on('error', (err) => {
       this.emit('connection:error', err)
     })
