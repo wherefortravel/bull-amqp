@@ -2,3 +2,7 @@ node_modules
 *.DS_Store
 lib
 yarn-error.log
+.idea/
+public
+tsc-build
+tsconfig.tsbuildinfo
