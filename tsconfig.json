@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "strictPropertyInitialization": false,
+    "strict": true,
+    "noEmitOnError": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "target": "es2018",
+    "moduleResolution": "node",
+    "allowJs": true,
+    "noEmit": false,
+    "isolatedModules": false,
+    "esModuleInterop": true,
+    "outDir": "public",
+    "baseUrl": ".",
+    "module": "esnext",
+    "pretty": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "declaration": true,
+    "typeRoots": ["./node_modules/@types", "./types"],
+    "composite": true
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "exclude" : [
+    "node_modules",
+    "**/node_modules/**",
+    "lib"
+  ]
+}

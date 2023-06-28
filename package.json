@@ -1,6 +1,6 @@
 {
   "name": "bull-amqp",
-  "version": "1.8.5",
+  "version": "1.9.0",
   "description": "A (almost) drop-in replacement for the Bull queue, backed by the AMQP protocol",
   "main": "lib/index.js",
   "repository": "https://github.com/wherefortravel/bull-amqp",
@@ -13,15 +13,19 @@
     "lodash": "^4.17.13"
   },
   "scripts": {
-    "build": "rm -rf ./lib && babel src --out-dir lib --copy-files",
-    "prepublish": "yarn build"
+    "prepublish": "yarn build",
+    "build": "yarn build-swc",
+    "build-swc": "SWCRC=true swc src -d lib -D",
+    "check-types": "tsc --noEmit --incremental"
   },
   "devDependencies": {
-    "babel-cli": "^6.26.0",
-    "babel-plugin-module-resolver": "^3.1.1",
-    "babel-plugin-transform-class-properties": "^6.24.1",
-    "babel-plugin-transform-flow-strip-types": "^6.22.0",
-    "babel-plugin-transform-object-rest-spread": "^6.26.0",
-    "babel-preset-env": "^1.7.0"
-  }
+    "@swc/cli": "^0.1.62",
+    "@swc/core": "^1.3.66",
+    "@swc/helpers": "^0.5.1",
+    "@types/amqplib": "^0.10.1",
+    "@types/bluebird": "^3.5.38",
+    "swc-plugin-transform-cjs-imports": "^0.1.5",
+    "typescript": "^5.1.5"
+  },
+  "type": "module"
 }
