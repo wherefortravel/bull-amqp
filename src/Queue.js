@@ -5,10 +5,12 @@ import Bluebird from 'bluebird'
 import { EventEmitter } from 'events'
 import crypto from 'crypto'
 import connections from 'amqp-connection-manager'
+import { setTimeout } from "timers/promises"
 
 export type Options = {
   connectionString: string,
   prefix: string,
+  minProcessingTimeMs?: number,
 }
 
 type Job = {}
@@ -80,9 +82,19 @@ class Queue extends EventEmitter {
       throw new Error(`options are required`)
     }
 
+    const minProcessingTimeMs = parseInt(
+      process.env.BULL_AMQP_MIN_PROCESSING_TIME_MS,
+      10
+    )
+
     this._options = options
+    this._options.minProcessingTimeMs =
+      minProcessingTimeMs ?? this._options.minProcessingTimeMs;
+
     this._name = name
-    this._setup()
+    this._setup().catch((err) => {
+      this.emit("error", err);
+    })
   }
 
   _resetToInitialState() {
@@ -151,6 +163,9 @@ class Queue extends EventEmitter {
   }
 
   async process(name?: string, concurrency?: number, handler: ProcessFn) {
+    concurrency =
+      parseInt(process.env.BULL_AMQP_CONCURRENCY, 10) || concurrency
+
     switch (arguments.length) {
       case 1:
         // $FlowFixMe
@@ -202,7 +217,13 @@ class Queue extends EventEmitter {
           const job = {
             data,
           }
-          const result = await promiseHandler(job)
+
+          const [result] = await Promise.all([
+            promiseHandler(job),
+            this._options?.minProcessingTimeMs !== undefined
+              ? setTimeout(this._options.minProcessingTimeMs)
+              : Promise.resolve(),
+          ])
 
           // see if we need to reply
           if (
