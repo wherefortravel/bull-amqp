@@ -41,3 +41,8 @@ setInterval(async () => {
 }, 5000)
 
 ```
+
+# Environment variables
+
+*BULL_AMQP_MIN_PROCESSING_TIME_MS* - sets minimum processing time in milliseconds
+*BULL_AMQP_CONCURRENCY* - overrides concurrency value
