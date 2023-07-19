@@ -89,7 +89,7 @@ class Queue extends EventEmitter {
 
     this._options = options
     this._options.minProcessingTimeMs =
-      minProcessingTimeMs ?? this._options.minProcessingTimeMs;
+      minProcessingTimeMs || this._options.minProcessingTimeMs;
 
     this._name = name
     this._setup().catch((err) => {
@@ -220,7 +220,7 @@ class Queue extends EventEmitter {
 
           const [result] = await Promise.all([
             promiseHandler(job),
-            this._options?.minProcessingTimeMs !== undefined
+            this._options.minProcessingTimeMs !== undefined
               ? setTimeout(this._options.minProcessingTimeMs)
               : Promise.resolve(),
           ])
