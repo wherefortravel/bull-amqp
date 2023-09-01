@@ -11,11 +11,15 @@ export type Options = {
   connectionString: string,
   prefix: string,
   minProcessingTimeMs?: number,
+  channelArguments?: {
+    'x-max-priority'?: number,
+  }
 }
 
 type Job = {}
 type JobOpts = {
   timeout?: number,
+  priority?: number,
 }
 
 type Chan = any
@@ -135,8 +139,14 @@ class Queue extends EventEmitter {
 
   async _ensureQueueExists(queue: string, channel: any) {
     if (!(queue in this._queuesExist)) {
+      const channelArguments =
+        this._options && this._options.channelArguments ? this._options.channelArguments : undefined
       async function setup(chan) {
-        await chan.assertQueue(queue)
+        if (channelArguments) {
+          await chan.assertQueue(queue, { arguments: channelArguments })
+        } else {
+          await chan.assertQueue(queue)
+        }
       }
       const promise = runOnceForChannel(this._chan, setup)
       this._queuesExist[queue] = true
@@ -277,6 +287,9 @@ class Queue extends EventEmitter {
     const publishOpts = {
       ...this._getPublishOptions(),
       ...publishOptions,
+    }
+    if (opts && opts.priority) {
+      publishOpts.priority = opts.priority
     }
 
     await this._sendInternal(queue, content, publishOpts)
