@@ -1,6 +1,6 @@
 {
   "name": "bull-amqp",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "A (almost) drop-in replacement for the Bull queue, backed by the AMQP protocol",
   "main": "lib/index.js",
   "repository": "https://github.com/wherefortravel/bull-amqp",
@@ -8,7 +8,7 @@
   "license": "MIT",
   "dependencies": {
     "amqp-connection-manager": "^2.3.0",
-    "amqplib": "^0.5.2",
+    "amqplib": "^0.7.1",
     "babel-runtime": "^6.26.0",
     "bluebird": "^3.5.1",
     "lodash": "^4.17.13"
