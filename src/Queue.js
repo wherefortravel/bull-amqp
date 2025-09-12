@@ -67,6 +67,8 @@ class Queue extends EventEmitter {
   _queuesExist: { [key: string]: boolean }
   _replyHandlers: Map<string, Function>
   _replyQueue: ?Promise<string>
+  _consumerTags: { [key: string]: string }
+  _stopped: boolean
 
   constructor(name: string, connectionString: string, options?: Options | string) {
     super()
@@ -108,6 +110,8 @@ class Queue extends EventEmitter {
     this._consumeChan = Object.create(null)
     this._replyHandlers = new Map()
     this._replyQueue = null
+    this._consumerTags = Object.create(null)
+    this._stopped = false
   }
 
   async _setup() {
@@ -219,8 +223,9 @@ class Queue extends EventEmitter {
     await this._ensureQueueExists(queue, chan)
 
     chan.addSetup(async (chan) => {
+      if (this._stopped) return
       await chan.prefetch(concurrency)
-      chan.consume(queue, async (msg) => {
+      const { consumerTag } = await chan.consume(queue, async (msg) => {
         let data = {}
         try {
           data = JSON.parse(msg.content.toString())
@@ -279,6 +284,7 @@ class Queue extends EventEmitter {
           }
         }
       })
+      this._consumerTags[queue] = consumerTag
     })
   }
 
@@ -388,6 +394,25 @@ class Queue extends EventEmitter {
         this._replyHandlers.delete(correlationId)
         return Promise.reject(new Error(`Timeout of ${timeout}ms exceeded`))
       })
+  }
+
+  async stopAcceptingNewJobs() {
+    this._stopped = true
+    const queues = Object.keys(this._consumeChan || {})
+    await Promise.all(
+      queues.map(async (queue) => {
+        const chanWrapper = this._consumeChan[queue]
+        const tag = this._consumerTags && this._consumerTags[queue]
+        if (!chanWrapper || !tag) return
+        await runOnceForChannel(chanWrapper, async (chan) => {
+          try {
+            await chan.cancel(tag)
+          } catch (err) {
+            // ignore errors from cancel if already closed/canceled
+          }
+        })
+      })
+    )
   }
 
   pause() {
