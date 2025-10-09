@@ -226,6 +226,10 @@ class Queue extends EventEmitter {
       if (this._stopped) return
       await chan.prefetch(concurrency)
       const { consumerTag } = await chan.consume(queue, async (msg) => {
+        if (!msg) {
+          return
+        }
+
         let data = {}
         try {
           data = JSON.parse(msg.content.toString())
