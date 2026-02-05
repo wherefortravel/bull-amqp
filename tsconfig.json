@@ -15,5 +15,5 @@
     "moduleResolution": "node"
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "lib", "**/*.test.ts", "src/__mocks__"]
+  "exclude": ["node_modules", "lib", "**/*.test.ts"]
 }

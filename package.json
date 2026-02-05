@@ -8,8 +8,8 @@
   "author": "David Xu",
   "license": "MIT",
   "dependencies": {
-    "amqp-connection-manager": "^2.3.0",
-    "amqplib": "^0.7.1",
+    "amqp-connection-manager": "^5.0.0",
+    "amqplib": "^0.10.9",
     "bluebird": "^3.5.1",
     "lodash": "^4.17.13"
   },
@@ -21,7 +21,7 @@
     "prepublish": "yarn build"
   },
   "devDependencies": {
-    "@types/amqplib": "^0.5.17",
+    "@types/amqplib": "^0.10.0",
     "@types/bluebird": "^3.5.42",
     "@types/jest": "^29.5.12",
     "@types/lodash": "^4.17.0",
