@@ -1,6 +1,6 @@
 {
   "name": "bull-amqp",
-  "version": "1.11.0",
+  "version": "1.11.1",
   "description": "A (almost) drop-in replacement for the Bull queue, backed by the AMQP protocol",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
