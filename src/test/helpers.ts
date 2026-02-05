@@ -1,7 +1,7 @@
 import * as connections from 'amqp-connection-manager';
 
 export const getConnectionString = (): string =>
-  process.env.AMQP_URL || 'amqp://guest:guest@localhost:5672';
+  process.env.AMQP_URL || 'amqp://guest:guest@localhost:5673';
 
 export async function waitForRabbitMQ(maxAttempts = 30): Promise<void> {
   const connectionString = getConnectionString();

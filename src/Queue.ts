@@ -489,6 +489,17 @@ class Queue extends EventEmitter {
   empty(): never {
     throw new Error('Not implemented yet');
   }
+
+  // TODO: Implement close() to properly clean up AMQP connections
+  // This should:
+  // - Close all consume channels (_consumeChan)
+  // - Close the main channel (_chan)
+  // - Close the connection (_conn)
+  // - Clear reply handlers and queues
+  // This is needed for proper test cleanup and graceful shutdown
+  close(): never {
+    throw new Error('Not implemented yet');
+  }
 }
 
 export default Queue;

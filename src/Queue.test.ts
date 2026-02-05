@@ -594,6 +594,11 @@ describe('Queue', () => {
       const queue = new Queue(queueName, connectionString);
       expect(() => queue.empty()).toThrow('Not implemented yet');
     });
+
+    it('close() should throw "Not implemented yet"', () => {
+      const queue = new Queue(queueName, connectionString);
+      expect(() => queue.close()).toThrow('Not implemented yet');
+    });
   });
 
   describe('queue configuration', () => {
