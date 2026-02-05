@@ -4,8 +4,6 @@ An implementation of the bull npm library [https://github.com/OptimalBits/bull] 
 
 *NOTE: WORK IN PROGRESS - USE AT YOUR OWN RISK*
 
-Currently being used in production at [whereto.com](https://whereto.com "WhereTo.com")
-
 Demo with RPC calling:
 
 ```javascript
