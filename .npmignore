@@ -1,1 +1,7 @@
-.babelrc
+src/
+tsconfig.json
+jest.config.js
+coverage/
+**/*.test.ts
+**/__mocks__/
+.idea/
