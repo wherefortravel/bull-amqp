@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 // Mock amqp-connection-manager before importing Queue
 jest.mock('amqp-connection-manager');
 
-import Queue from './Queue';
+import Queue, { Job } from './Queue';
 
 interface MockMessage {
   content: Buffer;
@@ -33,10 +33,12 @@ interface MockChannelWrapper extends EventEmitter {
   waitForConnect: jest.Mock;
   sendToQueue: jest.Mock;
   addSetup: jest.Mock;
+  close: jest.Mock;
 }
 
 interface MockConnection extends EventEmitter {
   createChannel: jest.Mock;
+  close: jest.Mock;
   _channels: MockChannelWrapper[];
 }
 
@@ -67,6 +69,7 @@ const createMockChannelWrapper = (channel: MockChannel): MockChannelWrapper => {
   wrapper.addSetup = jest.fn().mockImplementation(async (fn: (chan: MockChannel) => Promise<void>) => {
     await fn(channel);
   });
+  wrapper.close = jest.fn().mockResolvedValue(undefined);
   return wrapper;
 };
 
@@ -78,6 +81,7 @@ const createMockConnection = (): MockConnection => {
     conn._channels.push(wrapper);
     return wrapper;
   });
+  conn.close = jest.fn().mockResolvedValue(undefined);
   return conn;
 };
 
@@ -595,13 +599,25 @@ describe('Queue', () => {
       expect(() => queue.empty()).toThrow('Not implemented yet');
     });
 
-    it('close() should throw "Not implemented yet"', () => {
+    it('close() should close all channels and connection', async () => {
       const queue = new Queue(queueName, connectionString);
-      expect(() => queue.close()).toThrow('Not implemented yet');
+
+      // Set up a consumer to create consume channels
+      await queue.process(async (job: Job) => job.data);
+
+      await queue.close();
+
+      // Verify connection was closed
+      expect(mockConnection.close).toHaveBeenCalled();
     });
   });
 
   describe('queue configuration', () => {
+    it('should expose queue name via getter', () => {
+      const queue = new Queue(queueName, connectionString);
+      expect(queue.name).toBe(queueName);
+    });
+
     it('should use custom prefix', async () => {
       const queue = new Queue(queueName, {
         connectionString,

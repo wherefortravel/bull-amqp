@@ -114,6 +114,10 @@ class Queue extends EventEmitter {
     });
   }
 
+  get name(): string {
+    return this._name;
+  }
+
   private _resetToInitialState(): void {
     this._chan = null;
     this._conn = null;
@@ -490,15 +494,43 @@ class Queue extends EventEmitter {
     throw new Error('Not implemented yet');
   }
 
-  // TODO: Implement close() to properly clean up AMQP connections
-  // This should:
-  // - Close all consume channels (_consumeChan)
-  // - Close the main channel (_chan)
-  // - Close the connection (_conn)
-  // - Clear reply handlers and queues
-  // This is needed for proper test cleanup and graceful shutdown
-  close(): never {
-    throw new Error('Not implemented yet');
+  async close(): Promise<void> {
+    // Stop accepting new jobs first
+    this._stopped = true;
+
+    // Close all consume channels
+    const consumeChannels = Object.values(this._consumeChan);
+    await Promise.all(
+      consumeChannels.map(async (chan) => {
+        try {
+          await chan.close();
+        } catch {
+          // Ignore errors if channel is already closed
+        }
+      })
+    );
+
+    // Close the main channel
+    if (this._chan) {
+      try {
+        await this._chan.close();
+      } catch {
+        // Ignore errors if channel is already closed
+      }
+    }
+
+    // Close the connection
+    if (this._conn) {
+      try {
+        await this._conn.close();
+      } catch {
+        // Ignore errors if connection is already closed
+      }
+    }
+
+    // Clear all state
+    this._replyHandlers.clear();
+    this._resetToInitialState();
   }
 }
 
