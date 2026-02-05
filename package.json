@@ -17,6 +17,8 @@
     "build": "rm -rf ./lib && tsc",
     "test": "jest",
     "test:coverage": "jest --coverage",
+    "test:integration": "docker compose up -d && ./scripts/wait-for-rabbitmq.sh && ./scripts/run-integration-tests.sh; docker compose down",
+    "test:integration:watch": "jest --config jest.config.integration.js --watch",
     "typecheck": "tsc --noEmit",
     "prepublish": "yarn build"
   },
