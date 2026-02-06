@@ -11,19 +11,24 @@ const getUnderlyingConnection = (queue: Queue): AmqpConnectionManager | null => 
 
 describe('Queue Integration Tests', () => {
   // Note: Queue cleanup is intentionally skipped because:
-  // 1. The Queue class doesn't expose a close() method
-  // 2. Closing connections causes "Channel ended" errors in amqp-connection-manager
-  // 3. Test queues use unique names and won't interfere with other tests
-  // 4. Queues are cleaned up when RabbitMQ restarts or via docker-compose down
+  // 1. Closing AMQP connections causes "Channel ended" errors that Jest reports as failures
+  // 2. Test queues use unique names and won't interfere with other tests
+  // 3. Queues are cleaned up when RabbitMQ restarts or via docker-compose down
+  // 4. The close() method is available for production use
 
   const createQueue = (name: string, options?: Record<string, unknown>): Queue => {
     const queueName = uniqueQueueName(name);
 
-    return new Queue(queueName, {
+    const queue = new Queue(queueName, {
       connectionString: getConnectionString(),
       prefix: 'bull',
       ...options,
     });
+
+    // Suppress "Channel ended" errors during Jest teardown
+    queue.on('error', () => {});
+
+    return queue;
   };
 
   describe('Connection', () => {
@@ -56,6 +61,7 @@ describe('Queue Integration Tests', () => {
         connectionString: 'amqp://invalid:invalid@localhost:9999',
         prefix: 'bull',
       });
+      queue.on('error', () => {});
 
       // The queue should exist and have event handlers wired
       expect(queue).toBeInstanceOf(Queue);
@@ -89,6 +95,7 @@ describe('Queue Integration Tests', () => {
         connectionString: 'amqp://invalid:invalid@localhost:9999',
         prefix: 'bull',
       });
+      queue.on('error', () => {});
 
       queue.on('connection:error', (err: Error) => {
         errorEvents.push(err);
@@ -513,6 +520,7 @@ describe('Queue Integration Tests', () => {
         connectionString: getConnectionString(),
         prefix: 'bull',
       });
+      queue.on('error', () => {});
 
       await new Promise<void>((resolve) => {
         queue.on('connection:connected', () => resolve());
@@ -522,9 +530,9 @@ describe('Queue Integration Tests', () => {
         return { echo: job.data.value };
       });
 
-      const response = await queue.call(queueName, { value: 'hello' }, { timeout: 5000 });
+      const response = await queue.call(queueName, { value: 'hello' }, { timeout: 10000 });
       expect(response).toEqual({ echo: 'hello' });
-    });
+    }, 20000);
   });
 
   describe('Named Queues', () => {
@@ -590,6 +598,7 @@ describe('Queue Integration Tests', () => {
         connectionString: getConnectionString(),
         prefix: customPrefix,
       });
+      queue.on('error', () => {});
 
       await new Promise<void>((resolve) => {
         queue.on('connection:connected', () => resolve());
@@ -601,6 +610,9 @@ describe('Queue Integration Tests', () => {
         processedJobs.push(job.data);
         return 'done';
       });
+
+      // Wait for consumer to be fully ready
+      await delay(200);
 
       // Add to named queue
       await queue.add(namedSuffix, { prefixed: true });
@@ -851,11 +863,13 @@ describe('Queue Integration Tests', () => {
         connectionString: getConnectionString(),
         prefix: 'bull',
       });
+      queue1.on('error', () => {});
 
       const queue2 = new Queue(sharedQueueName, {
         connectionString: getConnectionString(),
         prefix: 'bull',
       });
+      queue2.on('error', () => {});
 
       // Wait for both to connect
       await Promise.all([

@@ -250,7 +250,7 @@ class Queue extends EventEmitter {
 
     await this._ensureQueueExists(queue, chan);
 
-    chan.addSetup(async (chan: Channel) => {
+    await chan.addSetup(async (chan: Channel) => {
       if (this._stopped) return;
       await chan.prefetch(concurrency);
       const { consumerTag } = await chan.consume(queue, async (msg: ConsumeMessage | null) => {
@@ -370,31 +370,24 @@ class Queue extends EventEmitter {
     await this._fireJob(name, data, resolvedOpts);
   }
 
-  private async _ensureRpcQueueInternal(): Promise<string> {
-    if (!this._replyQueue) {
-      let _resolve: (queue: string) => void;
-      this._replyQueue = new Promise<string>((resolve) => {
-        _resolve = resolve;
-      });
-
-      const setup = async (chan: Channel): Promise<void> => {
-        const q = await chan.assertQueue('', { exclusive: true });
-        _resolve(q.queue);
-      };
-
-      await runOnceForChannel(this._chan!, setup);
-    }
-
-    return await this._replyQueue;
-  }
-
   private async _ensureRpcQueue(): Promise<string> {
     if (!this._replyQueue) {
-      const replyQueue = await this._ensureRpcQueueInternal();
+      let resolveQueue: (queue: string) => void;
+      this._replyQueue = new Promise<string>((resolve) => {
+        resolveQueue = resolve;
+      });
+
       const replyHandlers = this._replyHandlers;
-      const setup = async (chan: Channel): Promise<void> => {
+
+      // Use addSetup so the reply queue and consumer survive channel reconnections.
+      // runOnceForChannel was previously used here but it creates a one-shot consumer
+      // on the raw channel that is lost if the channel is recreated.
+      await this._chan!.addSetup(async (chan: Channel) => {
+        const q = await chan.assertQueue('', { exclusive: true });
+        resolveQueue(q.queue);
+
         chan.consume(
-          replyQueue,
+          q.queue,
           (msg: ConsumeMessage | null) => {
             if (!msg) return;
             const correlationId = msg.properties.correlationId;
@@ -409,9 +402,7 @@ class Queue extends EventEmitter {
             noAck: true,
           }
         );
-      };
-
-      await runOnceForChannel(this._chan!, setup);
+      });
     }
 
     return await this._replyQueue!;
@@ -500,15 +491,13 @@ class Queue extends EventEmitter {
 
     // Close all consume channels
     const consumeChannels = Object.values(this._consumeChan);
-    await Promise.all(
-      consumeChannels.map(async (chan) => {
-        try {
-          await chan.close();
-        } catch {
-          // Ignore errors if channel is already closed
-        }
-      })
-    );
+    for (const chan of consumeChannels) {
+      try {
+        await chan.close();
+      } catch {
+        // Ignore errors if channel is already closed
+      }
+    }
 
     // Close the main channel
     if (this._chan) {

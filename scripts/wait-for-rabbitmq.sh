@@ -4,10 +4,15 @@ set -e
 MAX_ATTEMPTS=30
 ATTEMPT=1
 
-echo "Waiting for RabbitMQ to be ready..."
+# Get the RabbitMQ port from AMQP_URL or use default
+AMQP_PORT="${AMQP_PORT:-5673}"
+MANAGEMENT_PORT="${MANAGEMENT_PORT:-15673}"
+
+echo "Waiting for RabbitMQ to be ready on ports $AMQP_PORT (AMQP) and $MANAGEMENT_PORT (Management)..."
 
 while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-  if docker compose exec -T rabbitmq rabbitmq-diagnostics ping > /dev/null 2>&1; then
+  # Check if management API is responding (more reliable than docker exec)
+  if curl -s -f -u guest:guest "http://localhost:$MANAGEMENT_PORT/api/health/checks/alarms" > /dev/null 2>&1; then
     echo "RabbitMQ is ready!"
     exit 0
   fi
