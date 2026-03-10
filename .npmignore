@@ -1,1 +1,12 @@
-.babelrc
+src/
+tsconfig.json
+jest.config.js
+jest.config.integration.js
+coverage/
+**/*.test.ts
+**/*.integration.test.ts
+**/__mocks__/
+.idea/
+docker-compose.yml
+docker-compose.override.yml
+scripts/

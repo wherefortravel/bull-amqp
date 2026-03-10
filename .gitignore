@@ -2,3 +2,5 @@ node_modules
 *.DS_Store
 lib
 yarn-error.log
+coverage/
+docker-compose.override.yml
