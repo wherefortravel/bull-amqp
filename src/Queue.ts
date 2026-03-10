@@ -186,7 +186,11 @@ class Queue extends EventEmitter {
 
   private _ensureConsumeChannelOpen(queue: string): ChannelWrapper {
     if (!(queue in this._consumeChan)) {
-      this._consumeChan[queue] = this._conn!.createChannel();
+      const chan = this._conn!.createChannel();
+      chan.on('error', (err: Error) => {
+        this.emit('channel:error', { queue, err });
+      });
+      this._consumeChan[queue] = chan;
     }
 
     return this._consumeChan[queue];
