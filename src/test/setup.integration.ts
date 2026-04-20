@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import { waitForRabbitMQ, getConnectionString } from './helpers';
 
 // Suppress "Channel ended" errors that occur during Jest teardown

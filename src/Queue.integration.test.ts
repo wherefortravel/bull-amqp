@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import * as connections from 'amqp-connection-manager';
 import type { AmqpConnectionManager } from 'amqp-connection-manager';
 import Queue, { Job } from './Queue';

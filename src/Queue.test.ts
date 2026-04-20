@@ -1,3 +1,4 @@
+/// <reference types="jest" />
 import { EventEmitter } from 'events';
 
 // Mock amqp-connection-manager before importing Queue
@@ -33,6 +34,11 @@ interface MockChannelWrapper extends EventEmitter {
   waitForConnect: jest.Mock;
   sendToQueue: jest.Mock;
   addSetup: jest.Mock;
+  removeSetup: jest.Mock;
+  consume: jest.Mock;
+  cancelAll: jest.Mock;
+  ack: jest.Mock;
+  nack: jest.Mock;
   close: jest.Mock;
 }
 
@@ -69,6 +75,21 @@ const createMockChannelWrapper = (channel: MockChannel): MockChannelWrapper => {
   wrapper.addSetup = jest.fn().mockImplementation(async (fn: (chan: MockChannel) => Promise<void>) => {
     await fn(channel);
   });
+  wrapper.removeSetup = jest.fn().mockResolvedValue(undefined);
+  wrapper.consume = jest.fn().mockImplementation((queue: string, callback: ConsumeCallback, opts?: { prefetch?: number }) => {
+    if (opts?.prefetch !== undefined) {
+      channel.prefetch(opts.prefetch);
+    }
+    consumerCallbacks.set(queue, callback);
+    consumerTagCounter++;
+    channel.consume(queue, callback);
+    return Promise.resolve({ consumerTag: `consumer-tag-${consumerTagCounter}` });
+  });
+  wrapper.cancelAll = jest.fn().mockImplementation(async () => {
+    await channel.cancel('mock-tag');
+  });
+  wrapper.ack = jest.fn().mockImplementation((msg) => channel.ack(msg));
+  wrapper.nack = jest.fn().mockImplementation((msg: MockMessage, allUpTo: boolean, requeue: boolean) => channel.nack(msg, allUpTo, requeue));
   wrapper.close = jest.fn().mockResolvedValue(undefined);
   return wrapper;
 };
@@ -168,7 +189,7 @@ describe('Queue', () => {
       });
 
       setImmediate(() => {
-        mockConnection.emit('error', testError);
+        mockConnection.emit('connectFailed', { err: testError });
       });
     });
 
@@ -182,7 +203,7 @@ describe('Queue', () => {
       });
 
       setImmediate(() => {
-        mockConnection.emit('close', testError);
+        mockConnection.emit('disconnect', { err: testError });
       });
     });
   });
@@ -352,7 +373,8 @@ describe('Queue', () => {
 
       await callback!(msg);
 
-      expect(mockChannel.sendToQueue).toHaveBeenCalledWith(
+      const consumeChan = mockConnection._channels[1];
+      expect(consumeChan.sendToQueue).toHaveBeenCalledWith(
         'reply-queue',
         expect.any(Buffer),
         { correlationId: 'corr-123' }
@@ -427,6 +449,47 @@ describe('Queue', () => {
       const sendToQueueCalls = mainChannel.sendToQueue.mock.calls;
       const dlqCall = sendToQueueCalls.find((call: unknown[]) => call[0] === 'bull-dead-letter-queue');
       expect(dlqCall).toBeDefined();
+    });
+
+    it('should isolate consume channels — each process() call gets its own channel', async () => {
+      const queue = new Queue(queueName, connectionString);
+
+      await queue.process('queue-a', jest.fn().mockResolvedValue('done'));
+      await queue.process('queue-b', jest.fn().mockResolvedValue('done'));
+
+      // _channels[0] is the main publish channel created in _setup()
+      // _channels[1] and [2] are the consume channels, one per process() call
+      const [mainChan, chanA, chanB] = mockConnection._channels;
+
+      expect(mockConnection._channels).toHaveLength(3);
+
+      // Each consume channel registered its own consumer
+      expect(chanA.consume).toHaveBeenCalledWith('bull-queue-a', expect.any(Function), expect.any(Object));
+      expect(chanB.consume).toHaveBeenCalledWith('bull-queue-b', expect.any(Function), expect.any(Object));
+
+      // Consume channels have no addSetup calls — consumers go through ChannelWrapper.consume(), not addSetup
+      expect(chanA.addSetup).not.toHaveBeenCalled();
+      expect(chanB.addSetup).not.toHaveBeenCalled();
+
+      // Main channel has no consumers registered directly on it
+      expect(mainChan.consume).not.toHaveBeenCalled();
+    });
+
+    it('should isolate RPC setup from consume channels', async () => {
+      const queue = new Queue(queueName, connectionString);
+
+      await queue.process(jest.fn().mockResolvedValue('done'));
+      await expect(queue.call({ data: true }, { timeout: 50 })).rejects.toThrow('Timeout');
+
+      const [mainChan, consumeChan] = mockConnection._channels;
+
+      // RPC addSetup belongs only to the main channel
+      expect(mainChan.addSetup).toHaveBeenCalledTimes(1);
+      expect(consumeChan.addSetup).not.toHaveBeenCalled();
+
+      // Consumer belongs only to the consume channel
+      expect(consumeChan.consume).toHaveBeenCalledTimes(1);
+      expect(mainChan.consume).not.toHaveBeenCalled();
     });
   });
 
@@ -551,6 +614,27 @@ describe('Queue', () => {
       expect(sendToQueueCall[2]).toHaveProperty('correlationId');
       expect(sendToQueueCall[2]).toHaveProperty('replyTo');
     });
+
+    it('should register RPC setup once and reuse across reconnects', async () => {
+      const queue = new Queue(queueName, connectionString);
+      const mainChan = mockConnection._channels[0];
+
+      // First call registers the setup exactly once
+      await expect(queue.call({ request: 'data' }, { timeout: 50 })).rejects.toThrow('Timeout');
+      expect(mainChan.addSetup).toHaveBeenCalledTimes(1);
+      expect(mainChan.removeSetup).not.toHaveBeenCalled();
+
+      // Multiple reconnects — no new registrations, no removals
+      mockConnection.emit('connect', {});
+      mockConnection.emit('connect', {});
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(mainChan.addSetup).toHaveBeenCalledTimes(1);
+      expect(mainChan.removeSetup).not.toHaveBeenCalled();
+
+      // Subsequent calls reuse the existing setup
+      await expect(queue.call({ request: 'data' }, { timeout: 50 })).rejects.toThrow('Timeout');
+      expect(mainChan.addSetup).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('stopAcceptingNewJobs()', () => {
@@ -563,12 +647,21 @@ describe('Queue', () => {
       // Verify consumer was registered
       expect(mockChannel.consume).toHaveBeenCalled();
 
-      // Wait for addSetup to complete (it's not awaited in process())
-      await new Promise((resolve) => setImmediate(resolve));
-
       await queue.stopAcceptingNewJobs();
 
       expect(mockChannel.cancel).toHaveBeenCalled();
+    });
+
+    it('should call cancelAll on the consume channel wrapper', async () => {
+      const queue = new Queue(queueName, connectionString);
+      const handler = jest.fn().mockResolvedValue('done');
+
+      await queue.process(handler);
+
+      const consumeChan = mockConnection._channels[1];
+      await queue.stopAcceptingNewJobs();
+
+      expect(consumeChan.cancelAll).toHaveBeenCalled();
     });
 
     it('should handle empty consumer list', async () => {
