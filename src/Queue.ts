@@ -284,7 +284,6 @@ class Queue extends EventEmitter {
 
         chan.ack(msg);
       } catch (err) {
-        chan.nack(msg, false, false);
         const pubChan = this._chan!;
         const errors = (data['$$errors'] as unknown[]) || [];
         const errorWithFormat = [...errors, formatError(err)];
@@ -308,6 +307,8 @@ class Queue extends EventEmitter {
             this._getPublishOptions()
           );
         }
+
+        chan.nack(msg, false, false);
       }
     }, { prefetch: concurrency });
   }
