@@ -71,8 +71,8 @@ class Queue extends EventEmitter {
   private _queuesExist: Record<string, boolean> = Object.create(null);
   private _replyHandlers: Map<string, (result: unknown) => void> = new Map();
   private _replyQueue: Promise<string> | null = null;
-  private _consumerTags: Record<string, string> = Object.create(null);
-  private _stopped: boolean = false;
+  private _rpcSetupRegistered: boolean = false;
+  private _resolveRpcQueue: ((queue: string) => void) | null = null;
 
   constructor(name: string, connectionString: string | Options, options?: Options | string);
   constructor(name: string, options: Options);
@@ -125,8 +125,8 @@ class Queue extends EventEmitter {
     this._consumeChan = Object.create(null);
     this._replyHandlers = new Map();
     this._replyQueue = null;
-    this._consumerTags = Object.create(null);
-    this._stopped = false;
+    this._rpcSetupRegistered = false;
+    this._resolveRpcQueue = null;
   }
 
   private async _setup(): Promise<void> {
@@ -142,17 +142,21 @@ class Queue extends EventEmitter {
     this._chan = conn.createChannel();
 
     conn.on('connect', () => {
-      // after reconnect we need to reset _replyQueue to restore work of .call
-      // otherwise await this._replyQueue - will stuck
-      this._replyQueue = null;
       this.emit('connection:connected');
     });
 
-    conn.on('error', (err: Error) => {
+    conn.on('connectFailed', ({ err }: { err: Error }) => {
       this.emit('connection:error', err);
     });
 
-    conn.on('close', (err: Error) => {
+    conn.on('disconnect', ({ err }: { err: Error }) => {
+      // Invalidate stale reply queue so call() waits for addSetup to recreate it
+      // on the new channel rather than publishing with a dead exclusive queue name.
+      if (this._rpcSetupRegistered) {
+        let resolve!: (queue: string) => void;
+        this._replyQueue = new Promise<string>((r) => { resolve = r; });
+        this._resolveRpcQueue = resolve;
+      }
       this.emit('connection:close', err);
     });
   }
@@ -250,74 +254,63 @@ class Queue extends EventEmitter {
 
     await this._ensureQueueExists(queue, chan);
 
-    await chan.addSetup(async (chan: Channel) => {
-      if (this._stopped) return;
-      await chan.prefetch(concurrency);
-      const { consumerTag } = await chan.consume(queue, async (msg: ConsumeMessage | null) => {
-        if (!msg) {
-          return;
+    await chan.consume(queue, async (msg: ConsumeMessage) => {
+      let data: Record<string, unknown> = {};
+      try {
+        data = JSON.parse(msg.content.toString());
+
+        const job: Job<T> = {
+          data: data as unknown as T,
+        };
+
+        const [result] = await Promise.all([
+          promiseHandler(job),
+          this._options.minProcessingTimeMs !== undefined
+            ? setTimeout(this._options.minProcessingTimeMs)
+            : Promise.resolve(),
+        ]);
+
+        // see if we need to reply
+        if (
+          typeof result !== 'undefined' &&
+          typeof msg.properties === 'object' &&
+          typeof msg.properties.replyTo !== 'undefined' &&
+          typeof msg.properties.correlationId !== 'undefined'
+        ) {
+          await chan.sendToQueue(msg.properties.replyTo, Buffer.from(JSON.stringify(result), 'utf8'), {
+            correlationId: msg.properties.correlationId,
+          });
         }
 
-        let data: Record<string, unknown> = {};
-        try {
-          data = JSON.parse(msg.content.toString());
+        chan.ack(msg);
+      } catch (err) {
+        const pubChan = this._chan!;
+        const errors = (data['$$errors'] as unknown[]) || [];
+        const errorWithFormat = [...errors, formatError(err)];
+        const withWithErrors = { ...data, '$$errors': errorWithFormat };
 
-          const job: Job<T> = {
-            data: data as unknown as T,
-          };
+        if (errorWithFormat.length < 3) {
+          this.emit('single-failure', err);
+          await pubChan.sendToQueue(
+            queue,
+            Buffer.from(JSON.stringify(withWithErrors)),
+            this._getPublishOptions()
+          );
+        } else {
+          this.emit('failure', err);
+          const dlqQueue = this._getQueueName('dead-letter-queue');
+          await this._ensureQueueExists(dlqQueue, pubChan);
 
-          const [result] = await Promise.all([
-            promiseHandler(job),
-            this._options.minProcessingTimeMs !== undefined
-              ? setTimeout(this._options.minProcessingTimeMs)
-              : Promise.resolve(),
-          ]);
-
-          // see if we need to reply
-          if (
-            typeof result !== 'undefined' &&
-            typeof msg.properties === 'object' &&
-            typeof msg.properties.replyTo !== 'undefined' &&
-            typeof msg.properties.correlationId !== 'undefined'
-          ) {
-            await chan.sendToQueue(msg.properties.replyTo, Buffer.from(JSON.stringify(result), 'utf8'), {
-              correlationId: msg.properties.correlationId,
-            });
-          }
-
-          chan.ack(msg);
-        } catch (err) {
-          chan.nack(msg, false, false);
-          const pubChan = this._chan!;
-          const errors = (data['$$errors'] as unknown[]) || [];
-          const newErrors = [...errors, formatError(err)];
-          const newData = {
-            ...data,
-            ['$$errors']: newErrors,
-          };
-
-          if (newErrors.length < 3) {
-            this.emit('single-failure', err);
-            await pubChan.sendToQueue(
-              queue,
-              Buffer.from(JSON.stringify(newData)),
-              this._getPublishOptions()
-            );
-          } else {
-            this.emit('failure', err);
-            const dlqQueue = this._getQueueName('dead-letter-queue');
-            await this._ensureQueueExists(dlqQueue, pubChan);
-
-            await pubChan.sendToQueue(
-              dlqQueue,
-              Buffer.from(JSON.stringify(newData)),
-              this._getPublishOptions()
-            );
-          }
+          await pubChan.sendToQueue(
+            dlqQueue,
+            Buffer.from(JSON.stringify(withWithErrors)),
+            this._getPublishOptions()
+          );
         }
-      });
-      this._consumerTags[queue] = consumerTag;
-    });
+
+        chan.nack(msg, false, false);
+      }
+    }, { prefetch: concurrency });
   }
 
   private async _fireJob(
@@ -372,37 +365,39 @@ class Queue extends EventEmitter {
 
   private async _ensureRpcQueue(): Promise<string> {
     if (!this._replyQueue) {
-      let resolveQueue: (queue: string) => void;
-      this._replyQueue = new Promise<string>((resolve) => {
-        resolveQueue = resolve;
-      });
-
       const replyHandlers = this._replyHandlers;
+      let resolve!: (queue: string) => void;
+      this._replyQueue = new Promise<string>((r) => { resolve = r; });
+      this._resolveRpcQueue = resolve;
 
-      // Use addSetup so the reply queue and consumer survive channel reconnections.
-      // runOnceForChannel was previously used here but it creates a one-shot consumer
-      // on the raw channel that is lost if the channel is recreated.
-      await this._chan!.addSetup(async (chan: Channel) => {
-        const q = await chan.assertQueue('', { exclusive: true });
-        resolveQueue(q.queue);
+      if (!this._rpcSetupRegistered) {
+        this._rpcSetupRegistered = true;
 
-        chan.consume(
-          q.queue,
-          (msg: ConsumeMessage | null) => {
-            if (!msg) return;
-            const correlationId = msg.properties.correlationId;
-            const replyHandler = replyHandlers.get(correlationId);
-
-            if (replyHandler) {
-              replyHandler(JSON.parse(msg.content.toString()));
-              replyHandlers.delete(correlationId);
-            }
-          },
-          {
-            noAck: true,
+        await this._chan!.addSetup(async (chan: Channel): Promise<void> => {
+          const q = await chan.assertQueue('', { exclusive: true });
+          // Replace pending/stale promise with resolved one, then unblock any waiters.
+          this._replyQueue = Promise.resolve(q.queue);
+          if (this._resolveRpcQueue) {
+            this._resolveRpcQueue(q.queue);
+            this._resolveRpcQueue = null;
           }
-        );
-      });
+
+          chan.consume(
+            q.queue,
+            (msg: ConsumeMessage | null) => {
+              if (!msg) return;
+              const correlationId = msg.properties.correlationId;
+              const replyHandler = replyHandlers.get(correlationId);
+
+              if (replyHandler) {
+                replyHandler(JSON.parse(msg.content.toString()));
+                replyHandlers.delete(correlationId);
+              }
+            },
+            { noAck: true }
+          );
+        });
+      }
     }
 
     return await this._replyQueue!;
@@ -451,21 +446,8 @@ class Queue extends EventEmitter {
   }
 
   async stopAcceptingNewJobs(): Promise<void> {
-    this._stopped = true;
-    const queues = Object.keys(this._consumeChan || {});
-    await Promise.all(
-      queues.map(async (queue) => {
-        const chanWrapper = this._consumeChan[queue];
-        const tag = this._consumerTags && this._consumerTags[queue];
-        if (!chanWrapper || !tag) return;
-        await runOnceForChannel(chanWrapper, async (chan: Channel) => {
-          try {
-            await chan.cancel(tag);
-          } catch {
-            // ignore errors from cancel if already closed/canceled
-          }
-        });
-      })
+    await Promise.all(Object.values(this._consumeChan).map(
+      (ch) => ch.cancelAll())
     );
   }
 
@@ -486,9 +468,6 @@ class Queue extends EventEmitter {
   }
 
   async close(): Promise<void> {
-    // Stop accepting new jobs first
-    this._stopped = true;
-
     // Close all consume channels
     const consumeChannels = Object.values(this._consumeChan);
     for (const chan of consumeChannels) {

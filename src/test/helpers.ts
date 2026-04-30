@@ -9,7 +9,6 @@ export async function waitForRabbitMQ(maxAttempts = 30): Promise<void> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const conn = connections.connect(connectionString);
-      const channel = conn.createChannel();
 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
@@ -27,7 +26,6 @@ export async function waitForRabbitMQ(maxAttempts = 30): Promise<void> {
         });
       });
 
-      await channel.close();
       await conn.close();
       return;
     } catch (err) {
